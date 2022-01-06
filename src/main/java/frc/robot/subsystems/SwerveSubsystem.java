@@ -5,94 +5,103 @@
 
 package frc.robot.subsystems;
 
+import com.kauailabs.navx.frc.AHRS;
+import edu.wpi.first.wpilibj.SerialPort;
+import edu.wpi.first.wpilibj.geometry.Translation2d;
+import edu.wpi.first.wpilibj.kinematics.ChassisSpeeds;
+import edu.wpi.first.wpilibj.kinematics.SwerveDriveKinematics;
+import edu.wpi.first.wpilibj.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import frc.robot.Tuple;
-
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import frc.robot.Constants;
+import java.util.*;
 import java.util.function.Consumer;
 
-import static frc.robot.subsystems.SwerveModule.Position.*;
 import static frc.robot.Constants.*;
 
 public class SwerveSubsystem extends SubsystemBase
 {
+    private List<SwerveModule> modules;
+    private SwerveDriveKinematics kinematics;
 
-    private final SwerveModule a;
-    private final SwerveModule b;
-    private final SwerveModule c;
-    private final SwerveModule d;
-    private Map<SwerveModule.Position, SwerveModule> modules;
+    //Probably doesn't need to be in this subsystem
+    private final AHRS gyro;
 
     /** Creates a new ExampleSubsystem. */
     public SwerveSubsystem()
     {
-        modules = new HashMap<>();
+        gyro = new AHRS(SerialPort.Port.kMXP);
 
-        a = new SwerveModule(A_SPIN_ID, A_DRIVE_ID, A_OFFSET, FrontRight, false, true);
-        modules.put(FrontRight, a);
+        modules = new LinkedList<>();
+        double loc = Constants.SWERVE_LENGTH/2.0;
 
-        b = new SwerveModule(B_SPIN_ID, B_DRIVE_ID, B_OFFSET, FrontLeft, true, true);
-        modules.put(FrontLeft, b);
+        //FrontRight
+        modules.add(new SwerveModule(A_SPIN_ID, A_DRIVE_ID, A_OFFSET, false, true, loc, loc));
+        //FrontLeft
+        modules.add(new SwerveModule(B_SPIN_ID, B_DRIVE_ID, B_OFFSET, true, true, loc, -loc));
+        //BackLeft
+        modules.add(new SwerveModule(C_SPIN_ID, C_DRIVE_ID, C_OFFSET, false, true, -loc, -loc));
+        //BackRight
+        modules.add(new SwerveModule(D_SPIN_ID, D_DRIVE_ID, D_OFFSET, true, true, -loc, loc));
 
-        c = new SwerveModule(C_SPIN_ID, C_DRIVE_ID, C_OFFSET, BackLeft, false, true);
-        modules.put(BackLeft, c);
-
-        d = new SwerveModule(D_SPIN_ID, D_DRIVE_ID, D_OFFSET, BackRight, true, true);
-        modules.put(BackRight, d);
+        // The order of this list mirrors the order in setStates
+        kinematics = new SwerveDriveKinematics(modules.stream().map(m -> m.getTranslation()).toArray(Translation2d[]::new));
     }
 
     public void initialize(){
-        modules(sm -> sm.zeroHeading());
+        resetDistances();
+        modules(m -> m.zeroHeading());
+        this.gyro.reset();
+    }
+
+    public void resetDistances(){
+        modules(m -> m.resetDistance());
     }
 
     @Override
     public void periodic()
     {
-
+        modules(m -> m.periodic());
     }
 
-
-    @Override
-    public void simulationPeriodic()
-    {
-        // This method will be called once per scheduler run during simulation
+    public void setHeadings(double angle){
+        modules(m -> m.setHeading(angle));
     }
 
-    // y -> forward/reverse
-    // x -> side to side
-    // z -> rotation
-    public void drive(double y, double x, double z){
-        // The joystick is noisy and causes a lot of extra wheel spin
-        double cy = clip(y, .1);
-        double cx = clip(x, .1);
-        double cz = clip(z, .1);
+    public void setVelocities(double velo){
+        modules(m -> m.setVelocity(velo));
+    }
 
-        double zMag = Math.signum(cz) * Math.sqrt(Math.pow(cz, 2) / 2.);
+    public void modules(Consumer<SwerveModule> action){
+        modules.forEach(action);
+    }
 
-        //If any of the magnitudes are greater than 1 we want to normalize them
-        double tmpmax = 1.;
-        Map<SwerveModule.Position, Tuple<Double, Double>> mna = new HashMap<>();
-        for(SwerveModule sm : modules()){
-            Tuple<Double, Double> rotation = sm.getRotationalSpeeds(zMag);
-            double nx = cx + rotation.x;
-            double ny = cy + rotation.y;
-            double angle = Math.toDegrees(Math.atan2(nx, ny));
-            double mag = Math.sqrt(Math.pow(nx, 2) + Math.pow(ny, 2));
-            if(mag > tmpmax){
-                tmpmax = mag;
-            }
-            mna.put(sm.position, new Tuple<>(mag, angle));
+    public double getYaw(){
+        return gyro.getYaw();
+    }
+
+    public void resetGyro(){
+        this.gyro.reset();
+    }
+
+    public SwerveModuleState[] getStates(){
+        return modules.stream().map(m -> m.getState()).toArray(SwerveModuleState[]::new);
+    }
+
+    // The order of this list mirrors the order in the constructor
+    public void setStates(SwerveModuleState[] states){
+        for(int i = 0; i < states.length; i++){
+            modules.get(i).setState(states[i]);
         }
+    }
 
-        System.out.println(mna);
-
-        final double max = tmpmax;
-        this.modules(sm -> sm.setHeading(mna.get(sm.position).y));
-        this.modules(sm -> sm.setSpeed(mna.get(sm.position).x / max));
-
+    public void drive(double xSpeed, double ySpeed, double zSpeed, boolean fieldRelative) {
+        double maxVelo = 3;
+        double x = clip(xSpeed, .1) * maxVelo;
+        double y = clip(ySpeed, .1) * maxVelo;
+        double z = clip(zSpeed, .1) * maxVelo;
+        SwerveModuleState[] swerveModuleStates = kinematics.toSwerveModuleStates(fieldRelative ? ChassisSpeeds.fromFieldRelativeSpeeds(-x, y, z, this.gyro.getRotation2d()) : new ChassisSpeeds(-x, y, z));
+        SwerveDriveKinematics.normalizeWheelSpeeds(swerveModuleStates, maxVelo);
+        setStates(swerveModuleStates);
     }
 
     private static double clip(double val, double clip){
@@ -104,15 +113,4 @@ public class SwerveSubsystem extends SubsystemBase
         }
     }
 
-    public void modules(Consumer<SwerveModule> action){
-        modules.values().forEach(action);
-    }
-
-    public List<SwerveModule> modules(){
-        return new LinkedList<>(modules.values());
-    }
-
-    public SwerveModule getModule(SwerveModule.Position position){
-        return this.modules.get(position);
-    }
 }

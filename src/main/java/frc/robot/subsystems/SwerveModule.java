@@ -5,56 +5,48 @@ import com.ctre.phoenix.motorcontrol.FeedbackDevice;
 import com.ctre.phoenix.motorcontrol.can.TalonSRX;
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.CANSparkMaxLowLevel;
-import frc.robot.Tuple;
+import com.revrobotics.ControlType;
+import edu.wpi.first.wpilibj.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.geometry.Translation2d;
+import edu.wpi.first.wpilibj.kinematics.SwerveModuleState;
 
 import static frc.robot.Constants.*;
 
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
 
-import static frc.robot.Constants.*;
 
 public class SwerveModule {
-
-    public enum Position {
-        FrontRight,
-        FrontLeft,
-        BackRight,
-        BackLeft
-    }
-
-    //Each motor has a different angle when rotated, so keep track of that here.
-    private final Map<Position, Tuple<Double, Double>> rotationMap = new HashMap<>() {{
-        put(Position.FrontRight, new Tuple<>(1., -1.));
-        put(Position.FrontLeft, new Tuple<>(1., 1.));
-        put(Position.BackRight, new Tuple<>(-1., -1.));
-        put(Position.BackLeft, new Tuple<>(-1., 1.));
-    }};
 
     private final int canSpin;
     private final int canDrive;
     protected boolean invertSpin;
     protected boolean invertDrive;
-    protected final Position position;
-    protected final int offset;
+    protected int offset;
 
     protected final TalonSRX talon;
     protected final CANSparkMax spark;
 
-    public SwerveModule(int canSpin, int canDrive, int offset, Position position, boolean invertSpin, boolean invertDrive) {
+    private Instant timestamp;
+    private double distance;
+    private double rotationOffset;
+
+    private Translation2d translation;
+
+    public SwerveModule(int canSpin, int canDrive, int offset, boolean invertSpin, boolean invertDrive, double xloc, double yloc) {
         this.canSpin = canSpin;
         this.canDrive = canDrive;
-        this.position = position;
         this.offset = offset;
         this.invertSpin = invertSpin;
         this.invertDrive = invertDrive;
         this.talon = new TalonSRX(canSpin);
         this.spark = new CANSparkMax(canDrive, CANSparkMaxLowLevel.MotorType.kBrushless);
+        this.timestamp = Instant.now();
+        this.distance = 0;
+        this.rotationOffset = 0;
+        this.translation = new Translation2d(xloc, yloc);
 
         configure();
-    }
-
-    public SwerveModule(int canSpin, int canDrive, int offset, Position position) {
-        this(canSpin, canDrive, offset, position, false, false);
     }
 
     private void configure(){
@@ -71,14 +63,28 @@ public class SwerveModule {
         this.talon.configAllowableClosedloopError(PID_IDX, ALLOWABLE_ERROR, TIMEOUT_MS);
 
         this.talon.config_kF(PID_IDX, 0.0, TIMEOUT_MS);
-        this.talon.config_kP(PID_IDX, DRIVE_P, TIMEOUT_MS);
-        this.talon.config_kI(PID_IDX, DRIVE_I, TIMEOUT_MS);
-        this.talon.config_kD(PID_IDX, DRIVE_D, TIMEOUT_MS);
+        this.talon.config_kP(PID_IDX, STEER_P, TIMEOUT_MS);
+        this.talon.config_kI(PID_IDX, STEER_I, TIMEOUT_MS);
+        this.talon.config_kD(PID_IDX, STEER_D, TIMEOUT_MS);
 
         this.talon.configNominalOutputForward(0, TIMEOUT_MS);
         this.talon.configNominalOutputReverse(0, TIMEOUT_MS);
         this.talon.configPeakOutputForward(PEAK_OUTPUT, TIMEOUT_MS);
         this.talon.configPeakOutputReverse(-PEAK_OUTPUT, TIMEOUT_MS);
+
+        this.spark.getPIDController().setP(DRIVE_P);
+        this.spark.getPIDController().setI(DRIVE_I);
+        this.spark.getPIDController().setD(DRIVE_D);
+        this.spark.getPIDController().setOutputRange(-PEAK_OUTPUT, PEAK_OUTPUT);
+
+        //It appears you can't invert a brushless motor's encoder, so we'll have to invert the velocity manually.
+        //this.spark.getEncoder().setInverted(true);
+
+        //https://github.com/FRCTeam2910/Common/blob/master/robot/src/main/java/org/frcteam2910/common/robot/drivers/Mk2SwerveModuleBuilder.java
+        //Odometry is speedMetersPerSecond, the default for the encoder is RPM.
+        //So we need to give the encoder a number to make RPM to MPS
+        // ((1 rot * Pi * Diameter) / (60 * 5.25)
+        this.spark.getEncoder().setVelocityConversionFactor((Math.PI * WHEEL_DIAMETER) / (60.0 * DRIVE_GEAR_RATIO));
     }
 
     public void zeroHeading(){
@@ -88,10 +94,10 @@ public class SwerveModule {
     //https://github.com/Team364/BaseFalconSwerve/blob/main/src/main/java/frc/lib/util/CTREModuleState.java
     public void setHeading(double degrees){
         double targetAngle = degrees;
-        double delta = targetAngle - getCurrentAngle();
+        double delta = targetAngle - getAngle();
         if (Math.abs(delta) > 90){
             this.setInvertDrive(true);
-            targetAngle = delta > 90 ? (targetAngle - 180.) : (targetAngle + 180.);
+            targetAngle = delta > 90 ? (targetAngle -= 180) : (targetAngle += 180);
         }
         else {
             this.setInvertDrive(false);
@@ -107,39 +113,42 @@ public class SwerveModule {
         this.spark.setInverted(invertDrive ^ inverted);
     }
 
-    public double getCurrentAngle(){
+    public double getAngle(){
         return ((this.talon.getSelectedSensorPosition(PID_IDX) - this.offset) / SPIN_NUM_CLICKS) * 360;
     }
 
-    public void setSpeed(double speed){
-        this.spark.set(speed);
+    //Meters per second
+    public double getVelocity(){
+        return spark.getEncoder().getVelocity();
     }
 
-    public void printStats(){
-        System.out.println("------Start------");
-        System.out.println("\t: " + this);
-        System.out.println("------End------");
+    public void setVelocity(double mps){
+        this.spark.getPIDController().setReference(mps, ControlType.kVelocity);
     }
 
-    @Override
-    public String toString() {
-        return "SwerveModule{" +
-                "position=" + position +
-                ", canSpin=" + canSpin +
-                ", canDrive=" + canDrive +
-                ", invertSpin=" + invertSpin +
-                ", invertDrive=" + invertDrive +
-                ", offset=" + offset +
-                ", currentClicks=" + this.talon.getSelectedSensorPosition() +
-                '}';
+    public void periodic()
+    {
+        Instant newTimestamp = Instant.now();
+        double elapsed = Duration.between(newTimestamp, timestamp).toMillis();
+        double velo = getVelocity() / 1000.0;
+        distance += velo * elapsed;
+        timestamp = newTimestamp;
     }
 
-    public boolean isSpinning(){
-        return this.talon.getClosedLoopError() > ALLOWABLE_ERROR;
+    public void resetDistance(){
+        this.distance = 0;
     }
 
-    public Tuple<Double, Double> getRotationalSpeeds(double zMag){
-        Tuple<Double, Double> rm = rotationMap.get(this.position);
-        return new Tuple<>(rm.x * zMag, rm.y * zMag);
+    public SwerveModuleState getState(){
+        return new SwerveModuleState(this.getVelocity(), Rotation2d.fromDegrees(this.getAngle()));
+    }
+
+    public void setState(SwerveModuleState state){
+        this.setVelocity(state.speedMetersPerSecond);
+        this.setHeading(state.angle.getDegrees());
+    }
+
+    public Translation2d getTranslation(){
+        return this.translation;
     }
 }

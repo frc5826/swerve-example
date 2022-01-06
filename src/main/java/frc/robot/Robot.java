@@ -5,12 +5,9 @@
 
 package frc.robot;
 
-import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import frc.robot.commands.BounceAroundCommand;
-import frc.robot.commands.JoystickCommand;
 
 /**
  * The VM is configured to automatically run this class, and to call the
@@ -34,7 +31,7 @@ public class Robot extends TimedRobot
         // Instantiate our RobotContainer.  This will perform all our button bindings, and put our
         // autonomous chooser on the dashboard.
         robotContainer = new RobotContainer();
-        CommandScheduler.getInstance().setDefaultCommand(robotContainer.getSwerveSubsystem(), new JoystickCommand(robotContainer.getSwerveSubsystem()));
+        CommandScheduler.getInstance().setDefaultCommand(robotContainer.getSwerveSubsystem(), robotContainer.getDefaultCommand());
     }
 
     /**
@@ -65,7 +62,10 @@ public class Robot extends TimedRobot
     @Override
     public void autonomousInit()
     {
-
+        Command auto = robotContainer.getAutoCommand();
+        if(auto != null){
+            auto.schedule();
+        }
     }
 
     /** This method is called periodically during autonomous. */

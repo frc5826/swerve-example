@@ -7,6 +7,7 @@ package frc.robot.commands;
 
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import frc.robot.Constants;
+import frc.robot.subsystems.SwerveModule;
 import frc.robot.subsystems.SwerveSubsystem;
 
 /** An example command that uses an example subsystem. */
@@ -38,7 +39,7 @@ public class JoystickCommand extends CommandBase
     // Called every time the scheduler runs while the command is scheduled.
     @Override
     public void execute() {
-        this.subsystem.drive(-Constants.joystick.getY()/3, Constants.joystick.getX()/3, Constants.joystick.getZ()/3);
+        this.subsystem.drive(Constants.joystick.getY(), Constants.joystick.getX(), Constants.joystick.getZ(), false);
     }
 
 

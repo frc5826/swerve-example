@@ -6,6 +6,7 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.commands.*;
 import frc.robot.subsystems.SwerveSubsystem;
 
 /**
@@ -41,4 +42,14 @@ public class RobotContainer
     public SwerveSubsystem getSwerveSubsystem() {
         return swerve;
     }
+
+    public Command getDefaultCommand(){
+        return new JoystickCommand(getSwerveSubsystem());
+    }
+
+    public Command getAutoCommand(){
+//        return new DriveDistanceCommand(getSwerveSubsystem(), 1.0);
+        return new SwervePathCommand(getSwerveSubsystem());
+    }
+
 }

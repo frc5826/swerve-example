@@ -5,5 +5,12 @@
     "debugfile": "frcJava_roborio.debugconfig",
     "project": "swerve-tests",
     "language": "java"
+  },
+  {
+    "artifact": "frcJava (in project swerve)",
+    "target": "roborio",
+    "debugfile": "frcJava_roborio.debugconfig",
+    "project": "swerve",
+    "language": "java"
   }
 ]
